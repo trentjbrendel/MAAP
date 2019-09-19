@@ -75,8 +75,8 @@ if __name__ == '__main__':
     # N2A
     t0 = time.time()
     app2 = MainApplication(seq=seq_N2A, fov=0.84, sampling=1001, ob_NA=0.3, savfile_final='MAAP_N2A', mav_list=mav_list_N2A)
-    # app2.run(surf_i=2, surf_f=11, TF=0.6, RF=0.4)
-    # app2.run_on_surf_for_TF_RF_list(surf = 11, TF_list=np.arange(0.5, 1.01, 0.1), RF_list=np.arange(0, 1.01, 0.2))
+    app2.run(surf_i=2, surf_f=11, TF=0.6, RF=0.4)
+    app2.run_on_surf_for_TF_RF_list(surf = 11, TF_list=np.arange(0.5, 1.01, 0.1), RF_list=np.arange(0, 1.01, 0.2))
     app2.zernike_fit_for_TF_RF_list(surf = 11, TF_list=[0, 0.2, 0.4, 0.6, 0.8, 1], RF_list=[0, 0.2, 0.4, 0.6, 0.8, 1], num_term_1 = 100, num_term_2 = 66)
     
     try:
