@@ -549,7 +549,7 @@ class MainApplication:
             self.save_interference_image(interference_red, self.savefilename + "_red" + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF))
             
             # Make movie WLI
-            self.make_movie(Z_sag, self.savefilename)   
+            # self.make_movie(Z_sag, self.savefilename)   
 
             return x, y, z, x_center, dz, d_parameters, PV, RMSE, np.nanmax(NA), break_bool
 
@@ -716,6 +716,8 @@ class MainApplication:
                     # n_rot[zone-1] = (n_rot[zone-1]//3)*3
                     ###### case 3 반올림 ################
                     n_rot[zone-1] = (round(n_rot[zone-1]/3))*3
+                    if n_rot[zone-1] == 0:
+                        n_rot[zone-1] = 3
 
                 # # 엣지쪽만 있는 경우
                 # if zone != 1:
@@ -1289,6 +1291,54 @@ class MainApplication:
             # writer.writerows(np.transpose([Zrn_Coeff, Zrn_Coeff_fitted, Zrn_Coeff-Zrn_Coeff_fitted]))
             # writer.writerow(["RSS", RSS])
 
+    # Residual sum of squares of point cloud (resolution 10um)
+    def PV_point_cloud(self, Zrn_Coeff, Zrn_Coeff_fitted, **kwargs):
+        num_term_1 = kwargs["num_term_1"] # number of terms to fit
+        num_term_2 = kwargs["num_term_2"] # number of terms to compare
+        mav = kwargs["mav"]
+        if num_term_1 < num_term_2:
+            num_term_1 = num_term_2
+            print ("num_term_1 should be larger than num_term_2. num_term_1 is set to", num_term_2)
+        sample = kwargs["samples"] # number of samples of point clould which will be used to fit
+
+        x = np.arange(-mav, mav+0.001, 0.01) # step ~ resolution
+        y = np.arange(-mav, mav+0.001, 0.01) # step ~ resolution
+        xy = [x,y]
+        
+        x = np.array([k[0] for k in list(product(*xy))]) # mm
+        y = np.array([k[1] for k in list(product(*xy))]) # mm  
+        
+        rho = np.sqrt(x**2 + y**2)
+
+        x = x[(rho < mav)]
+        y = y[(rho < mav)]
+        rho = rho[(rho < mav)]
+
+        sag_in = 0
+        for j in range(num_term_2):
+            sag_in += Zrn_Coeff[j] * zernike_polynomials_xy(j, x/mav, y/mav) # normalize to mav
+
+        sag_fit = 0
+        for j in range(num_term_2):
+            sag_fit += Zrn_Coeff_fitted[j] * zernike_polynomials_xy(j, x/mav, y/mav) # normalize to mav
+
+        diff = sag_in-sag_fit
+
+        self.RSS_pc, self.PV_val = [None]*num_term_1, [None]*num_term_1
+        self.RSS_pc[0] = sum((sag_in-sag_fit)**2)
+        self.PV_val[0] = diff.max() - diff.min()
+        
+        print("PV result :", self.PV_val[0], "mm")
+
+        # csv for each surface
+        with open(self.savfile_final + '_Zer_fit_surf_' + str(self.surf) + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF) + "_sampling_" + str(sample) + '.csv', 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+            writer.writerow(["Zernike Term", "In", "Fit", "Diff", "RSS", "PV"])  
+            writer.writerows(np.transpose([range(1, num_term_1+1), Zrn_Coeff, Zrn_Coeff_fitted, Zrn_Coeff-Zrn_Coeff_fitted, self.RSS_pc, self.PV_val]))
+            # writer.writerow(["In", "Fit", "Diff"])  
+            # writer.writerows(np.transpose([Zrn_Coeff, Zrn_Coeff_fitted, Zrn_Coeff-Zrn_Coeff_fitted]))
+            # writer.writerow(["RSS", RSS])
+
     # Zernike fit from point cloud data for every TF/RF cases in list
     def zernike_fit_for_TF_RF_list(self, **kwargs):
         t0 = time.time()
@@ -1305,7 +1355,7 @@ class MainApplication:
         except:
             pass
         xlsx_row_test = 0 
-        workbook_test = xlsxwriter.Workbook('Results/Zernike_fit_TF_RF_list.xlsx')
+        workbook_test = xlsxwriter.Workbook('D:/Programming/MAAP_Results/Zernike_fit_TF_RF_list.xlsx')
         worksheet_test = workbook_test.add_worksheet()
         worksheet_test.set_column('B:G', 17)
         worksheet_test.write_row('B1', np.arange(0, 1.01, 0.2))
@@ -1324,18 +1374,21 @@ class MainApplication:
                 self.RF = j
                 Zrn_Coeff_fitted = self.zernike_fit_from_zernike_pol_point_cloud(surf = self.surf, Zrn_Coeff = Zrn_Coeff, mav = mav, TF=i, RF=j, \
                                                                                 num_term_1 = num_term_1, num_term_2 = num_term_2, samples=1000)
-                self.compare_zernike_coefficients(Zrn_Coeff, Zrn_Coeff_fitted, num_term_1 = num_term_1, num_term_2 = num_term_2, samples=1000)
+                # self.compare_zernike_coefficients(Zrn_Coeff, Zrn_Coeff_fitted, num_term_1 = num_term_1, num_term_2 = num_term_2, samples=1000)
+                self.PV_point_cloud(Zrn_Coeff, Zrn_Coeff_fitted, num_term_1 = num_term_1, num_term_2 = num_term_2, mav=mav, samples=1000)
+                
                 xlsx_col_test += 1
-                # n = 6
-                # self.savefilename = "Results/MAAP_N2A_surf_11_zone_" + str(n)
-                # while True:
-                #     if isfile(self.savefilename + '_in_xy_total_TF_' + "{:.2f}".format(i) + "_RF_" + "{:.2f}".format(j) + ".png"):
-                #         break
-                #     else:
-                #         n -= 1
-                #         self.savefilename = "Results/MAAP_N2A_surf_11_zone_" + str(n)
+                n = 6
+                self.savefilename = "D:/Programming/MAAP_Results/MAAP_N2A_surf_11_zone_" + str(n)
+                while True:
+                    if isfile(self.savefilename + '_in_xy_total_TF_' + "{:.2f}".format(i) + "_RF_" + "{:.2f}".format(j) + ".png"):
+                        break
+                    else:
+                        n -= 1
+                        self.savefilename = "D:/Programming/MAAP_Results/MAAP_N2A_surf_11_zone_" + str(n)
                 worksheet_test.insert_image(xlsx_row_test-1, xlsx_col_test, self.savefilename + '_in_xy_total_TF_' + "{:.2f}".format(i) + "_RF_" + "{:.2f}".format(j) + ".png", {'x_scale': 0.15, 'y_scale': 0.15})
-                worksheet_test.write(xlsx_row_test, xlsx_col_test, self.RSS[0])
+                # worksheet_test.write(xlsx_row_test, xlsx_col_test, self.RSS[0])
+                worksheet_test.write(xlsx_row_test, xlsx_col_test, self.PV_val[0])
                 try:
                     app2.CV_stop()
                 except:
