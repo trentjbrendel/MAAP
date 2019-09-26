@@ -479,7 +479,7 @@ class MainApplication:
         # print ("RMSE(um) : ", f"{RMSE*1000:.4f}")
         
         [x_new, y_new, z_new], x_center, dz = self.model(d_parameters, x_center, x_max_limit, CV_Coeff, mav)
-        print ("dz(um) : ", f"{dz*1000:.4f}")   # 아직 dz 값은 의미없음
+        print ("dz(um) : ", f"{dz*1000:.4f}")  
 
         print(len(~np.isnan(z_new)))
 
@@ -635,34 +635,8 @@ class MainApplication:
             print("x : ", np.nanmin(x_orig_zone), "~", np.nanmax(x_orig_zone))
             print("z : ", np.nanmin(z_orig_zone), "~", np.nanmax(z_orig_zone))
             
-            # collect left edge of x data to set the x_limit of next loop
-            # x_left_edge = x_orig_zone[0:-1:self.sampling]
-            # z_left_edge = z_orig_zone[0:-1:self.sampling]
-            
-            # if len(x_left_edge[~np.isnan(z_left_edge)]) == 0:
-            #     # break
-            #     x_max_limit = x_center - self.fov/2*np.cos(-d_parameters[0]*np.pi/180) + overlap
-            # else:
-            #     x_max_limit = np.max(x_left_edge[~np.isnan(z_left_edge)]) + overlap
-
+            # set the x_limit of next loop
             x_max_limit = x_orig_zone.min() + overlap
-
-            # # Remove nan
-            # x_orig_zone = x_orig_zone[np.where(~np.isnan(z_orig_zone))]
-            # y_orig_zone = y_orig_zone[np.where(~np.isnan(z_orig_zone))]
-            # z_orig_zone = z_orig_zone[np.where(~np.isnan(z_orig_zone))]
-
-            # If you want to use only Edge
-            # k1 = np.array(np.where(y_orig_zone==self.fov/2)[0])
-            # k2 = np.array(np.where(y_orig_zone==-self.fov/2)[0])
-            # k3 = np.array(np.where(x_orig_zone[0:-1] > x_orig_zone[1:])[0])
-            # k4 = k3+1
-            # # print(k1,k2,k3,k4)
-            # k = np.unique(np.concatenate((k1,k2,k3,k4),0))
-
-            # x_orig_zone = x_orig_zone[k]
-            # y_orig_zone = y_orig_zone[k]
-            # z_orig_zone = z_orig_zone[k]
 
             # Save zone image in original coordinate 
             # plt.figure(figsize=(8,8), dpi=80)
@@ -683,22 +657,6 @@ class MainApplication:
                     n_rot[zone-1] += 1
                     dc = 2*np.pi/n_rot[zone-1]
                     _, y_tmp = np.dot(rotate(-dc), [x_orig_zone[-1], y_orig_zone[-1]])
-
-                    # self.save_scan_region_image(x_orig_zone, y_orig_zone, n_rot, dc, num_data, x_orig, y_orig, self.savefilename)
-                    # img = Image.open(self.savefilename + "_in_xy_total_rot" + str(n_rot) + ".png")
-                    # img.show()
-
-                    # Check image and determine go/stop
-                    # yes = {'yes','y', 'ye', ''}
-                    # no = {'no','n'}
-                    # choice = input("Continue ? [y/n] : ").lower()
-                    # if choice in yes:
-                    #     pass
-                    # elif choice in no:
-                    #     break
-                    # else:
-                    #     print("You didn't input 'yes' or 'no'. It will be considered 'yes'.")
-                    #     pass
                     
                 if round(n_rot[zone-1]*self.TF) == 0:
                     n_rot[zone-1] = 1
@@ -731,7 +689,7 @@ class MainApplication:
                 dc = 0
                 
             x_orig_zone_list, y_orig_zone_list = [[]] * n_rot[zone-1], [[]] * n_rot[zone-1]
-            z_orig_zone_list = z_orig_zone * n_rot[zone-1]
+            z_orig_zone_list = [z_orig_zone] * n_rot[zone-1]
 
             for i in range(n_rot[zone-1]):
                 x_orig_zone_list[i], y_orig_zone_list[i] = np.dot(rotate(-dc*i), [x_orig_zone, y_orig_zone])
@@ -1399,3 +1357,180 @@ class MainApplication:
         # 수행시간
         t = (time.time() - t0)
         print("--- Total time : %d min %d sec ---" %((t/60), (t%60)))
+
+    # Save Point Cloud Data including inaccuracy of stages for Surface of TF/RF
+    def save_point_cloud_surf_tf_rf(self, **kwargs):
+        surf = kwargs["surf"]
+        self.TF = kwargs["TF"]
+        self.RF = kwargs["RF"]
+        x, y, z = self.run_on_surf(surf, TF=self.TF, RF=self.RF)
+        # csv
+        with open(self.savfile_final + '_surf_' + str(surf) + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF) + '.csv', 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if float(row['Surface']) == surf:
+                    zone = int(row['Zone'])
+                    x_center = float(row['dr(mm)'])
+                    d_theta = float(row["d_theta"]) # d_parameters[0]
+                    d_parameters = [d_theta]
+                    dc = float(row["dc (Deg)"])/180*np.pi
+                    n_rot = int(row["Num Rot"])
+                    dz = float(row["dz(um)"])/1000
+                    
+                    for j in range(n_rot):
+                        x[zone-1][j], y[zone-1][j] = np.dot(rotate(dc*j), [x[zone-1][j], y[zone-1][j]])
+                        x[zone-1][j], y[zone-1][j], z[zone-1][j] = self.tilt_only(d_parameters[0], x[zone-1][j]-x_center, y[zone-1][j], z[zone-1][j]-dz)
+                        
+                        # add inaccuracy
+                        dc_inacuuracy = np.random.random()*0.2 - 0.1 # 0.1 degree accuracy
+                        d_theta_inacuuracy = np.random.random()*0.2 - 0.1 # 0.1 degree accuracy
+                        x_inaccuracy = np.random.random()*0.02 - 0.01 # 10 um accuracy
+                        y_inaccuracy = np.random.random()*0.02 - 0.01 # 10 um accuracy
+                        z_inaccuracy = np.random.random()*0.02 - 0.01 # 10 um accuracy
+                        
+                        x[zone-1][j] += x_inaccuracy
+                        y[zone-1][j] += y_inaccuracy
+                        z[zone-1][j] += z_inaccuracy
+                        x[zone-1][j], y[zone-1][j] = np.dot(rotate(dc_inacuuracy), [x[zone-1][j], y[zone-1][j]])
+                        x[zone-1][j], y[zone-1][j], z[zone-1][j] = self.tilt_only(d_theta_inacuuracy, x[zone-1][j], y[zone-1][j], z[zone-1][j])
+                        
+                        savexyz_filename = self.savfile_final + '_surf_' + str(surf) + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF) + "_zone_" + str(zone) + "_sa_" + str(j+1)
+                        self.save_xyz(x[zone-1][j], y[zone-1][j], z[zone-1][j], savexyz_filename)
+
+                        # save inaccuracy
+                        with open(savexyz_filename + '_error.csv', 'a', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow(["dx (um)", "dy (um)", "dz (um)", "dc (deg)", "d_theta (deg)"])
+                            writer.writerow([x_inaccuracy*1000, y_inaccuracy*1000, z_inaccuracy, dc_inacuuracy, d_theta_inacuuracy])
+    
+    # Save Point Cloud Data for Surface from i to f
+    def save_point_cloud_surfs_tf_rf(self, **kwargs):
+        surf_i = kwargs["surf_i"]
+        surf_f = kwargs["surf_f"]
+        self.TF = kwargs["TF"]
+        self.RF = kwargs["RF"]
+        for surf in range(surf_i, surf_f+1):
+            self.save_point_cloud_surf_tf_rf(surf=surf, TF=self.TF, RF=self.RF)
+
+    # Search tilt angle for zone and calculate everything for zone and add error of translation and tilt
+    def run_on_zone_with_error(self, surf, zone, x_center, x_max_limit, CV_Coeff, mav):
+        print("----------------------------------")
+        print ("Surface", surf, "Zone", zone)    
+        print("----------------------------------")      
+        
+        d_parameters_i = [0]
+        
+        t0_fit = time.time()
+        # Optimization 
+        def fun(d_parameters, x_center, x_max_limit, CV_Coeff, mav):
+            [x, y, z], _, _ = self.model(d_parameters, x_center, x_max_limit, CV_Coeff, mav)
+            # PV_sag = max(z)-min(z)
+            # return PV_sag
+            # RMSE = np.sqrt(np.mean((z-np.mean(z))**2))
+            # return RMSE
+            x_y0 = x[np.where(y == 0)]
+            z_y0 = z[np.where(y == 0)]
+            return np.nanmax(np.abs((z_y0[1:-1] - z_y0[0:-2])/(x_y0[1:-1] - x_y0[0:-2])))
+
+        #dparams_bound = ([-0.1, -0.1, -0.1, -0.1, -0.1, -0.1], [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]) # bounds=dparams_bound, 
+        map_result = least_squares(
+            fun, d_parameters_i, jac='3-point', method='trf', \
+            ftol=1e-08, xtol=1e-08, gtol=1e-08, x_scale=1.0, loss='linear', \
+            f_scale=1.0, diff_step=None, tr_solver=None, tr_options={}, \
+            jac_sparsity=None, max_nfev=None, verbose=0, args=(x_center, x_max_limit, CV_Coeff, mav), kwargs={}
+            )  
+        # fitting time
+        t_fit = (time.time() - t0_fit)
+        print("--- Fitting Time : %d min %d sec ---" %((t_fit/60), (t_fit%60)))
+        
+        # Result
+        d_parameters = map_result.x
+        # d_theta = np.array(d_parameters[0])*np.pi/180 # radians
+        # dz = np.array(d_parameters[1])/1000 # mm
+        
+        # RMSE = map_result.fun[0] # mm
+
+        print ("d_theta(deg) : ", d_parameters[0])
+        # print ("RMSE(um) : ", f"{RMSE*1000:.4f}")
+        
+        [x_new, y_new, z_new], x_center, dz = self.model(d_parameters, x_center, x_max_limit, CV_Coeff, mav)
+        print ("dz(um) : ", f"{dz*1000:.4f}")
+
+        print(len(~np.isnan(z_new)))
+
+        if len(~np.isnan(z_new)) == 0:
+            break_bool = True
+        else:
+            break_bool = False
+        
+        ############ Plot and Save #################
+
+        self.savefilename = self.savfile_final + "_surf_"+ str(surf) + "_zone_" + str(zone)
+
+        # add inaccuracy
+        dc_inacuuracy = np.random.random()*0.2 - 0.1 # 0.1 degree accuracy
+        d_theta_inacuuracy = np.random.random()*0.2 - 0.1 # 0.1 degree accuracy
+        x_inaccuracy = np.random.random()*0.02 - 0.01 # 10 um accuracy
+        y_inaccuracy = np.random.random()*0.02 - 0.01 # 10 um accuracy
+        z_inaccuracy = np.random.random()*0.02 - 0.01 # 10 um accuracy
+        
+        # Interpolation -> sag, slope in tilted view
+        if d_parameters[0] == 0:
+            X, Y, Z_sag = self.sag_interpolation_zero_deg(CV_Coeff, x_center)
+        else:
+            X, Y, Z_sag = self.sag_interpolation(x_new, y_new, z_new, x_center)
+            
+        slope_x, slope_y, slope_mag = self.slope_cal(X, Y, Z_sag)
+
+        if len(np.where(~np.isnan(Z_sag))[0]) == 0 or len(np.where(~np.isnan(slope_mag))[0]) == 0:
+            break_bool = True
+        else:
+            break_bool = False
+
+        PV = np.nanmax(Z_sag) - np.nanmin(Z_sag)
+        print ("PV(um) : ", f"{PV*1000:.4f}") 
+        RMSE = np.sqrt(np.nanmean((Z_sag-np.nanmean(Z_sag))**2))
+        print ("RMSE(um) : ", f"{RMSE*1000:.4f}")
+        # center of scanning = np.mean(Z_sag_tmp)
+
+        slope_angle = np.arctan(slope_mag)
+        NA = np.sin(slope_angle)
+        NA_limit = np.where(NA > self.ob_NA, np.nan, NA)
+        Z_sag[np.where(np.isnan(NA_limit))] = np.nan        
+        
+        x = X[np.where(~np.isnan(NA_limit))].flatten()
+        y = Y[np.where(~np.isnan(NA_limit))].flatten()
+        z = Z_sag[np.where(~np.isnan(NA_limit))].flatten()
+
+        xmax_orig = self.tilt_only(-d_parameters[0], x[np.where(x==x.max())]-x_center, y[np.where(x==x.max())], z[np.where(x==x.max())]-dz)[0].max()
+        xmax_orig += x_center
+        
+        if zone == 1 and xmax_orig < (mav*0.99):
+            print("The measurable area is smaller than effective aperture. Do recursion.")
+            x_max_limit += (x_max_limit - xmax_orig)
+            return self.run_on_zone(surf,zone,x_center, x_max_limit, CV_Coeff, mav)
+        else:
+            # quiver plot of slope in tilted view                                                
+            self.save_quiverplot(X, Y, slope_x, slope_y, 20, self.savefilename + "_slope_quiver" + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF))
+
+            # pcolormesh plot of slope magnitude in tilted view                
+            # self.save_pcolormeshplot(X, Y, slope_mag, self.savefilename + "_slope_mag" + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF))
+
+            # pcolormesh plot of angle in tilted view
+            self.save_pcolormeshplot(X, Y, slope_angle*180/np.pi, self.savefilename + "_slope_angle" + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF))
+
+            # Calculate numerical aperture of objective for the zone
+            self.save_pcolormeshplot(X, Y, NA_limit, self.savefilename + "_NA" + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF))
+
+            # Interference plot
+            red = 0.6328 # um
+            interference_red = self.fringe_cal(Z_sag, red)
+            # self.save_interference(interference_red, self.savefilename + "_red")
+            self.save_interference_image(interference_red, self.savefilename + "_red" + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF))
+            
+            # Make movie WLI
+            # self.make_movie(Z_sag, self.savefilename)   
+
+            return x, y, z, x_center, dz, d_parameters, PV, RMSE, np.nanmax(NA), break_bool
+    # ing~~
+        
