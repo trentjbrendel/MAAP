@@ -81,8 +81,9 @@ if __name__ == '__main__':
     # app2.zernike_fit_for_TF_RF_list(surf = 11, TF_list=[0, 0.2, 0.4, 0.6, 0.8, 1], RF_list=[0, 0.2, 0.4, 0.6, 0.8, 1], num_term_1 = 100, num_term_2 = 66)
     # app2.save_point_cloud_surf_tf_rf(surf=2, TF=0.6, RF=0.4)
     # app2.save_point_cloud_surfs_tf_rf(surf_i=2, surf_f=11, TF=0.6, RF=0.4)
-    app2.save_point_cloud_surf_tf_rf_2(surf=7, TF=0.6, RF=0.4)
+    # app2.save_point_cloud_surf_tf_rf_2(surf=7, TF=0.6, RF=0.4)
     # app2.save_point_cloud_surfs_tf_rf_2(surf_i=2, surf_f=11, TF=0.6, RF=0.4)
+    app2.reconstruct_surf(surf=7, TF=0.6, RF=0.4)
     
     try:
         app2.CV_stop()

@@ -410,7 +410,7 @@ class MainApplication:
                 ax.scatter(x_orig[i][j][index], y_orig[i][j][index], z_orig[i][j][index], s=1)
         plt.tight_layout()
         plt.savefig(savefilename + ".png")
-        plt.close()
+        plt.show()
 
     # Model for tilt value search (Assuming r-translation and dc(z-rotation) algorithm)
     def model(self, d_parameters, x_center, x_max_limit, CV_Coeff, mav):
@@ -1428,7 +1428,7 @@ class MainApplication:
         for surf in range(surf_i, surf_f+1):
             self.save_point_cloud_surf_tf_rf(surf=surf, TF=self.TF, RF=self.RF)
 
-    # Save Point Cloud Data including inaccuracy of stages for Surface of TF/RF
+    # Save Point Cloud Data including inaccuracy of stages for Surface of TF/RF 2nd method
     def save_point_cloud_surf_tf_rf_2(self, **kwargs):
         surf = kwargs["surf"]
         self.TF = kwargs["TF"]
@@ -1495,7 +1495,7 @@ class MainApplication:
                         # Tilt
                         d_parameters[0] += tip_inacuuracy
                         x_tip, y_tip, z_tip = self.tilt_only(d_parameters[0], x, y, z) # tip
-                        y_tilt, x_tilt, z_tilt = self.tilt_only(tilt_inacuuracy, y_tip, x_tip, z_tip) # tip
+                        y_tilt, x_tilt, z_tilt = self.tilt_only(tilt_inacuuracy, y_tip, x_tip, z_tip) # tilt
                         
                         # Interpolation -> sag, slope in tilted view
                         X, Y, Z_sag = self.sag_interpolation(x_tilt, y_tilt, z_tilt, 0)
@@ -1543,6 +1543,7 @@ class MainApplication:
                             writer.writerow(["dx (um)", "dy (um)", "dz (um)", "dc (deg)", "d_tip (deg)", "d_tilt (deg)"])
                             writer.writerow([x_inaccuracy*1000, y_inaccuracy*1000, z_inaccuracy, dc_inacuuracy, tip_inacuuracy, tilt_inacuuracy])
     
+    # Save Point Cloud Data for Surface from i to f 2nd method
     def save_point_cloud_surfs_tf_rf_2(self, **kwargs):
         surf_i = kwargs["surf_i"]
         surf_f = kwargs["surf_f"]
@@ -1551,4 +1552,74 @@ class MainApplication:
         for surf in range(surf_i, surf_f+1):
             self.save_point_cloud_surf_tf_rf_2(surf=surf, TF=self.TF, RF=self.RF)
 
+    def reconstruct_surf(self, **kwargs):
+        surf = kwargs["surf"]
+        self.TF = kwargs["TF"]
+        self.RF = kwargs["RF"]
+
+        # mav 
+        try:
+            self.cvserver.Command('eva (map s1)') # GetMaxAperture is working after some Command (I don't know why) 
+            mav = self.cvserver.GetMaxAperture(surf,1)
+        except:
+            mav = self.mav_list[surf]
+
+        # csv
+        with open(self.savfile_final + '_surf_' + str(surf) + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF) + '.csv', 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            x_orig, y_orig, z_orig = [],[],[]
+            num_data = [] # Number of data for each zone 
+            n_rot = []
+            for row in reader:
+                if float(row['Surface']) == surf:
+                    zone = int(row['Zone'])
+                    x_center = float(row['dr(mm)'])
+                    d_theta = float(row["d_theta"]) # d_parameters[0]
+                    d_parameters = [d_theta]
+                    dc = float(row["dc (Deg)"])/180*np.pi
+                    n_rot = int(row["Num Rot"])
+                    dz = float(row["dz(um)"])/1000
+
+                    x = np.linspace(-self.fov/2, self.fov/2, self.sampling)
+                    y = np.linspace(-self.fov/2, self.fov/2, self.sampling)
+                    X, Y = np.meshgrid(x,y)
+                    
+                    x_orig_zone_list, y_orig_zone_list, z_orig_zone_list = [[]] * n_rot, [[]] * n_rot, [[]] * n_rot
+                    
+                    for j in range(n_rot):
+                        x = X.flatten()
+                        y = Y.flatten()
+                        self.savefilename = self.savfile_final + "_surf_"+ str(surf) + "_zone_" + str(zone) + "_sa_" + str(j+1) + "_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF)
+
+                        # read Z from csv
+                        Z = []
+                        with open(self.savefilename + "_Z.csv", 'r') as csvfile:
+                            reader = list(csv.reader(csvfile))
+                            for row in reader:
+                                Z.append(np.array(row, dtype=np.float64))
+
+                        z = np.array(Z).flatten()
+                        # print(x,y,z)
+
+                        # Measurement region in original coordinate
+                        x_orig_zone, y_orig_zone, z_orig_zone = self.tilt_only(-d_parameters[0], x, y, z)
+                        x_orig_zone += x_center
+                        z_orig_zone += dz
+
+                        x_orig_zone_list[j], y_orig_zone_list[j] = np.dot(rotate(dc*j), [x_orig_zone, y_orig_zone])
+                        z_orig_zone_list[j] = z_orig_zone
+                        
+                    x_orig_zone = np.array(x_orig_zone_list).flatten()
+                    y_orig_zone = np.array(y_orig_zone_list).flatten()
+                    z_orig_zone = np.array(z_orig_zone_list).flatten()
+                    num_data.append(len(x_orig_zone))
+
+                    # Total data
+                    x_orig.append(x_orig_zone_list)
+                    y_orig.append(y_orig_zone_list)
+                    z_orig.append(z_orig_zone_list)
+
+                    self.save_scan_region_image(x_orig, y_orig, mav, num_data, self.savefilename + "_in_xy_total")
+                    self.save_scan_region_3d_image(x_orig, y_orig, z_orig, mav, num_data, self.savefilename + "_in_xy_total_TF_" + "{:.2f}".format(self.TF) + "_RF_" + "{:.2f}".format(self.RF) + "_3d")
+                                
         
